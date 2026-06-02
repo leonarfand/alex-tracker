@@ -82,7 +82,9 @@ export default function Finance({ focusProjectId, onConsumeFocus }: FinanceProps
   async function loadAll() {
     try {
       const db = await getDb();
-      const projs = await db.select<Project[]>("SELECT * FROM projects WHERE COALESCE(tracks_finance, 1) = 1 ORDER BY name");
+      // Show only active/on-hold finance projects here; Done projects drop off
+      // the live Finance view (their transactions still count in All Projects).
+      const projs = await db.select<Project[]>("SELECT * FROM projects WHERE COALESCE(tracks_finance, 1) = 1 AND status != 'done' ORDER BY name");
       setProjects(projs);
       const txs = await db.select<Transaction[]>(`
         SELECT t.*, p.name as project_name
