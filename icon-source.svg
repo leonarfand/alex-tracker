@@ -1,0 +1,44 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="80" x2="900" y2="960" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b6cf8"/>
+      <stop offset="0.45" stop-color="#6d4ae6"/>
+      <stop offset="1" stop-color="#1f1b4d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.22" r="0.9">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tealglow" cx="0.85" cy="0.95" r="0.7">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="512" y1="60" x2="512" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="markGrad" x1="300" y1="320" x2="760" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9ddff"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#1a0b3a" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- App tile -->
+  <rect x="96" y="96" width="832" height="832" rx="208" fill="url(#bg)"/>
+  <rect x="96" y="96" width="832" height="832" rx="208" fill="url(#glow)"/>
+  <rect x="96" y="96" width="832" height="832" rx="208" fill="url(#tealglow)"/>
+  <rect x="96" y="96" width="832" height="832" rx="208" fill="url(#gloss)"/>
+  <rect x="98.5" y="98.5" width="827" height="827" rx="205.5" stroke="#ffffff" stroke-opacity="0.18" stroke-width="5"/>
+
+  <!-- Mark: rising trend + checkmark (track progress, done) -->
+  <g filter="url(#shadow)" stroke="url(#markGrad)" stroke-width="86" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- check / upward stroke -->
+    <path d="M324 540 L452 668 L700 372"/>
+  </g>
+  <!-- accent rising dots (a subtle 'tracking' motif) -->
+  <circle cx="324" cy="540" r="30" fill="#2dd4bf"/>
+  <circle cx="700" cy="372" r="30" fill="#ffffff"/>
+</svg>
