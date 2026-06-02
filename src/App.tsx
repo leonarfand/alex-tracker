@@ -189,13 +189,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    (async () => { await migrateLegacyReminders(); refreshPending(); })();
     initNotifications();
-    refreshPending();
     restoreTimer();
     registerGlobalHotkey();
     maybeAutoBackup();
     return () => { unregisterAll().catch(() => {}); };
   }, []);
+
+  // One-time cleanup: tasks created before reminders were split out still live in
+  // the todos table with a reminder_at. Move them into the reminders table so they
+  // stop cluttering To-Dos. Runs once (guarded by a flag).
+  async function migrateLegacyReminders() {
+    try {
+      if (localStorage.getItem("migrated.reminders.v1") === "1") return;
+      const db = await getDb();
+      const rows = await db.select<{ id:number; title:string; reminder_at:string }[]>(
+        "SELECT id, title, reminder_at FROM todos WHERE reminder_at IS NOT NULL AND done = 0"
+      );
+      const now = nowStamp();
+      for (const r of rows) {
+        const fired = r.reminder_at <= now ? 1 : 0; // don't re-alarm past reminders
+        await db.execute("INSERT INTO reminders (title, remind_at, fired) VALUES (?,?,?)", [r.title, r.reminder_at, fired]);
+        await db.execute("DELETE FROM todos WHERE id = ?", [r.id]);
+      }
+      localStorage.setItem("migrated.reminders.v1", "1");
+      if (rows.length > 0) toast(`Moved ${rows.length} reminder${rows.length > 1 ? "s" : ""} out of To-Dos`);
+    } catch {}
+  }
 
   // ── Scheduled reminders → alarm ──
   // reminder_at is stored as a LOCAL-naive timestamp ("YYYY-MM-DDTHH:MM[:SS]"),
