@@ -53,7 +53,7 @@ export default function Dashboard({ onNavigate }: Props) {
         db.select<{c:number}[]>("SELECT COUNT(*) as c FROM todos WHERE done=1 AND date(completed_at)=?", [today]),
         db.select<{c:number}[]>("SELECT COUNT(*) as c FROM notes"),
         db.select<{type:string,amount:number}[]>("SELECT type,SUM(amount) as amount FROM transactions WHERE substr(tx_date,1,7)=? GROUP BY type", [monthPrefix]),
-        db.select<{log_date:string}[]>("SELECT log_date FROM daily_logs ORDER BY log_date DESC LIMIT 60"),
+        db.select<{log_date:string}[]>("SELECT log_date FROM daily_logs WHERE TRIM(body) != '' ORDER BY log_date DESC LIMIT 60"),
         db.select<{id:number;name:string;emoji:string;color:string}[]>("SELECT id,name,emoji,color FROM habits ORDER BY created_at ASC"),
         db.select<{habit_id:number;check_date:string}[]>("SELECT habit_id,check_date FROM habit_checks WHERE check_date >= ?", [since30]),
         db.select<{d:string;c:number}[]>("SELECT date(completed_at) as d, COUNT(*) as c FROM todos WHERE done=1 AND completed_at IS NOT NULL AND date(completed_at) >= ? GROUP BY d", [since6]),

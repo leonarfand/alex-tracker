@@ -33,8 +33,10 @@ export default function DailyLog() {
   async function loadRecent() {
     try {
       const db = await getDb();
+      // Only list days that actually have a written entry — mood-only days
+      // (e.g. a mood set from the Dashboard) shouldn't clutter the list.
       const rows = await db.select<RecentEntry[]>(
-        "SELECT log_date, mood FROM daily_logs ORDER BY log_date DESC LIMIT 30"
+        "SELECT log_date, mood FROM daily_logs WHERE TRIM(body) != '' ORDER BY log_date DESC LIMIT 30"
       );
       setRecent(rows);
     } catch (e) { toast("Load failed", String(e)); }
