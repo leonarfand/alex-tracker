@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckSquare, NotebookPen, ArrowRight, TrendingUp, TrendingDown, Plus, Flame, Pin, Check } from "lucide-react";
+import { CheckSquare, NotebookPen, ArrowRight, TrendingUp, TrendingDown, Plus, Flame, Pin, Check, Bell } from "lucide-react";
 import { getDb } from "../db";
 import { useApp } from "../App";
 import { sounds } from "../sounds";
@@ -8,6 +8,8 @@ import { todayStr, nowStamp, shiftDay, monthStrWIB } from "../time";
 type Page = "dashboard" | "notes" | "todos" | "calendar" | "habits" | "daily" | "finance";
 
 interface Props { onNavigate: (p: Page) => void; }
+
+interface UpReminder { id: number; title: string; remind_at: string; }
 
 interface Stats {
   todosDue: number;
@@ -30,6 +32,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const [todos, setTodos]   = useState<RecentTodo[]>([]);
   const [notes, setNotes]   = useState<RecentNote[]>([]);
   const [habits, setHabits] = useState<HabitInfo[]>([]);
+  const [reminders, setReminders] = useState<UpReminder[]>([]);
   const [weekly, setWeekly] = useState<number[]>([]);
   const [todayMood, setTodayMood] = useState("");
   const [quickAdd, setQuickAdd]   = useState("");
@@ -99,12 +102,14 @@ export default function Dashboard({ onNavigate }: Props) {
       setWeekly(week);
       setHabits(habitInfos);
 
-      const [recentTodos, recentNotes] = await Promise.all([
+      const [recentTodos, recentNotes, upReminders] = await Promise.all([
         db.select<RecentTodo[]>("SELECT id,title,priority,due_date,done FROM todos WHERE done=0 ORDER BY due_date ASC NULLS LAST, priority DESC LIMIT 5"),
         db.select<RecentNote[]>("SELECT id,title,color,updated_at,pinned FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 5"),
+        db.select<UpReminder[]>("SELECT id,title,remind_at FROM reminders WHERE remind_at >= ? ORDER BY remind_at ASC LIMIT 6", [nowStamp()]),
       ]);
       setTodos(recentTodos);
       setNotes(recentNotes);
+      setReminders(upReminders);
 
       const moodRow = await db.select<{mood:string}[]>("SELECT mood FROM daily_logs WHERE log_date=?", [today]);
       setTodayMood(moodRow[0]?.mood ?? "");
@@ -310,12 +315,14 @@ export default function Dashboard({ onNavigate }: Props) {
           </div>
         </div>
 
-        {/* Habits + Tasks + Notes */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        {/* Tasks · Reminders · Habits */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
           {/* Pending tasks */}
           <div className="card" style={{ display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <span style={{ fontWeight:700, fontSize:13 }}>Up Next</span>
+              <span style={{ fontWeight:700, fontSize:13, display:"flex", alignItems:"center", gap:6 }}>
+                <CheckSquare size={13} color="var(--text-muted)" /> Tasks · Up Next
+              </span>
               <button className="btn btn-ghost btn-sm" onClick={() => onNavigate("todos")} style={{ gap:4 }}>
                 All <ArrowRight size={11} />
               </button>
@@ -338,6 +345,33 @@ export default function Dashboard({ onNavigate }: Props) {
                         {t.due_date}
                       </span>
                     )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Upcoming reminders */}
+          <div className="card" style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span style={{ fontWeight:700, fontSize:13, display:"flex", alignItems:"center", gap:6 }}>
+                <Bell size={13} color="#38bdf8" /> Reminders
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => onNavigate("calendar")} style={{ gap:4 }}>
+                Calendar <ArrowRight size={11} />
+              </button>
+            </div>
+            {reminders.length === 0 ? (
+              <div className="empty" style={{ padding:"16px 0" }}><div className="empty-icon">🔔</div><p style={{ fontSize:12 }}>No upcoming reminders</p></div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {reminders.map(r => (
+                  <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 8px", borderRadius:6, borderLeft:"2px solid #38bdf8", background:"#0d1f2d55" }}>
+                    <Bell size={12} color="#38bdf8" style={{ flexShrink:0 }} />
+                    <span style={{ flex:1, fontSize:13, color:"var(--text)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.title}</span>
+                    <span style={{ fontSize:10.5, color:"#7dd3fc", whiteSpace:"nowrap" }}>
+                      {r.remind_at.slice(5, 10).replace("-", "/")} {r.remind_at.slice(11, 16)}
+                    </span>
                   </div>
                 ))}
               </div>

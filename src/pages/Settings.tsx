@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Trash2, Info, Palette, Keyboard, Database, Volume2, AlertTriangle, FolderOpen, Save } from "lucide-react";
+import { Download, Trash2, Info, Palette, Keyboard, Database, Volume2, AlertTriangle, FolderOpen, Save, Bell } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getDb } from "../db";
 import { useApp } from "../App";
@@ -28,7 +28,7 @@ export default function Settings() {
   const [backupDays, setBackupDays] = useState(7);
   const [backupFolder, setBackupFolder] = useState("");
   const [backupLastAt, setBackupLastAt] = useState(0);
-  const { toast, currency, setCurrency } = useApp();
+  const { toast, currency, setCurrency, confirm } = useApp();
 
   useEffect(() => {
     setAccent(localStorage.getItem("settings.accent") ?? "violet");
@@ -109,6 +109,28 @@ export default function Settings() {
     setSoundEnabled(next);
     if (next) sounds.success();
     toast(next ? "Sounds on 🔊" : "Sounds off 🔇");
+  }
+
+  async function migrateReminders() {
+    try {
+      const db = await getDb();
+      const rows = await db.select<{id:number;title:string;reminder_at:string}[]>(
+        "SELECT id, title, reminder_at FROM todos WHERE reminder_at IS NOT NULL AND done = 0"
+      );
+      if (rows.length === 0) { toast("Nothing to convert", "No tasks have a reminder set"); return; }
+      const ok = await confirm({
+        title: `Convert ${rows.length} reminder-task${rows.length === 1 ? "" : "s"}?`,
+        message: "Tasks that have a reminder will become standalone Reminders and be removed from your To-Dos. Pure tasks (no reminder) are untouched.",
+        confirmLabel: "Convert",
+      });
+      if (!ok) return;
+      for (const r of rows) {
+        await db.execute("INSERT INTO reminders (title, remind_at) VALUES (?,?)", [r.title, r.reminder_at]);
+        await db.execute("DELETE FROM todos WHERE id=?", [r.id]);
+      }
+      toast(`Converted ${rows.length} into Reminders`);
+      loadCounts();
+    } catch (e) { toast("Failed", String(e)); }
   }
 
   async function exportData() {
@@ -272,6 +294,9 @@ export default function Settings() {
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             <button className="btn btn-primary btn-sm" onClick={exportData}>
               <Download size={13} /> Export backup (JSON)
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={migrateReminders}>
+              <Bell size={13} /> Convert reminder-tasks → Reminders
             </button>
             <button className="btn btn-danger btn-sm" onClick={openReset}>
               <Trash2 size={13} /> Erase all data
