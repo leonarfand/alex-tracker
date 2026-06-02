@@ -95,7 +95,7 @@ export default function App() {
   const [currency, setCurrencyState] = useState<string>(() => localStorage.getItem("settings.currency") ?? "$");
   const [runningTimer, setRunningTimer] = useState<RunningTimer | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-  const [alarms, setAlarms] = useState<{ id: number; title: string }[]>([]);
+  const [alarms, setAlarms] = useState<{ key: string; id: number; kind: "todo" | "reminder"; title: string }[]>([]);
   const [financeFocus, setFinanceFocus] = useState<number | null>(null);
   const toastIdRef = useRef(0);
 
@@ -204,14 +204,27 @@ export default function App() {
     const check = async () => {
       try {
         const db = await getDb();
-        const due = await db.select<{id:number;title:string}[]>(
-          "SELECT id, title FROM todos WHERE reminder_at IS NOT NULL AND reminder_at <= ? AND COALESCE(reminder_fired,0) = 0 AND done = 0",
-          [nowStamp()]
+        const now = nowStamp();
+        // Two sources: standalone reminders + tasks that carry a reminder.
+        const dueReminders = await db.select<{id:number;title:string}[]>(
+          "SELECT id, title FROM reminders WHERE remind_at <= ? AND fired = 0", [now]
         );
-        if (due.length === 0) return;
-        for (const t of due) {
+        const dueTasks = await db.select<{id:number;title:string}[]>(
+          "SELECT id, title FROM todos WHERE reminder_at IS NOT NULL AND reminder_at <= ? AND COALESCE(reminder_fired,0) = 0 AND done = 0",
+          [now]
+        );
+        if (dueReminders.length === 0 && dueTasks.length === 0) return;
+
+        const items: { key: string; id: number; kind: "todo" | "reminder"; title: string }[] = [];
+        for (const r of dueReminders) {
+          await db.execute("UPDATE reminders SET fired = 1 WHERE id = ?", [r.id]);
+          sendNotification({ title: "⏰ Reminder", body: r.title });
+          items.push({ key: `reminder-${r.id}`, id: r.id, kind: "reminder", title: r.title });
+        }
+        for (const t of dueTasks) {
           await db.execute("UPDATE todos SET reminder_fired = 1 WHERE id = ?", [t.id]);
-          sendNotification({ title: "⏰ Reminder", body: t.title });
+          sendNotification({ title: "⏰ Task reminder", body: t.title });
+          items.push({ key: `todo-${t.id}`, id: t.id, kind: "todo", title: t.title });
         }
         // Bring the window forward so the alarm is seen even if minimized/in tray.
         try {
@@ -219,7 +232,7 @@ export default function App() {
           await w.show(); await w.unminimize(); await w.setFocus();
         } catch {}
         startAlarm();
-        setAlarms(prev => [...prev, ...due]);
+        setAlarms(prev => [...prev, ...items]);
       } catch {}
     };
     // Once-a-day notification for recurring bills due/overdue this month.
@@ -248,19 +261,23 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  async function snoozeAlarm(id: number) {
+  async function snoozeAlarm(item: { key: string; id: number; kind: "todo" | "reminder" }) {
     try {
       const db = await getDb();
       const next = stampWIB(new Date(Date.now() + 10 * 60_000));
-      await db.execute("UPDATE todos SET reminder_at=?, reminder_fired=0 WHERE id=?", [next, id]);
+      if (item.kind === "reminder") {
+        await db.execute("UPDATE reminders SET remind_at=?, fired=0 WHERE id=?", [next, item.id]);
+      } else {
+        await db.execute("UPDATE todos SET reminder_at=?, reminder_fired=0 WHERE id=?", [next, item.id]);
+      }
       toast("Snoozed 10 minutes");
     } catch {}
-    dismissAlarm(id);
+    dismissAlarm(item.key);
   }
 
-  function dismissAlarm(id: number) {
+  function dismissAlarm(key: string) {
     setAlarms(prev => {
-      const next = prev.filter(a => a.id !== id);
+      const next = prev.filter(a => a.key !== key);
       if (next.length === 0) stopAlarm();
       return next;
     });
@@ -575,13 +592,18 @@ export default function App() {
             </h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 300, overflowY: "auto" }}>
               {alarms.map(a => (
-                <div key={a.id} style={{
+                <div key={a.key} style={{
                   display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
                   background: "var(--surface2)", borderRadius: 10, borderLeft: "3px solid var(--accent)",
                 }}>
-                  <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{a.title}</span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => snoozeAlarm(a.id)}>Snooze 10m</button>
-                  <button className="btn btn-primary btn-sm" onClick={() => dismissAlarm(a.id)}>Done</button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{a.title}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {a.kind === "reminder" ? "Reminder" : "Task"}
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" onClick={() => snoozeAlarm(a)}>Snooze 10m</button>
+                  <button className="btn btn-primary btn-sm" onClick={() => dismissAlarm(a.key)}>Done</button>
                 </div>
               ))}
             </div>

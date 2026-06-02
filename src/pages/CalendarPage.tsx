@@ -13,8 +13,10 @@ type Page = "dashboard"|"notes"|"todos"|"calendar"|"habits"|"daily"|"finance"|"p
 interface Props { onNavigate: (p: Page) => void; }
 
 interface CalTodo { id:number; title:string; done:number; priority:string; due_date:string; reminder_at:string|null; }
+interface CalReminder { id:number; title:string; remind_at:string; }
 interface EditForm { id:number; title:string; priority:string; due_date:string; remDate:string; remTime:string; }
-interface DayData { hasLog: boolean; mood: string; todos: CalTodo[]; }
+interface ReminderEdit { id:number; title:string; date:string; time:string; }
+interface DayData { hasLog: boolean; mood: string; todos: CalTodo[]; reminders: CalReminder[]; }
 
 const WEEKDAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -39,7 +41,40 @@ export default function CalendarPage({ onNavigate }: Props) {
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [reminderTime, setReminderTime] = useState("09:00");
   const [edit, setEdit] = useState<EditForm | null>(null);
+  const [remEdit, setRemEdit] = useState<ReminderEdit | null>(null);
   const { toast, confirm } = useApp();
+
+  function openReminderEdit(r: CalReminder) {
+    const [d, t] = r.remind_at.split("T");
+    setRemEdit({ id: r.id, title: r.title, date: d, time: (t || "09:00").slice(0, 5) });
+  }
+
+  async function saveReminderEdit() {
+    if (!remEdit || !remEdit.title.trim()) return;
+    try {
+      const db = await getDb();
+      await db.execute(
+        "UPDATE reminders SET title=?, remind_at=?, fired=0 WHERE id=?",
+        [remEdit.title, `${remEdit.date}T${remEdit.time}:00`, remEdit.id]
+      );
+      toast("Reminder updated");
+      setRemEdit(null);
+      await loadMonth();
+    } catch (e) { toast("Failed", String(e)); }
+  }
+
+  async function deleteReminder() {
+    if (!remEdit) return;
+    const ok = await confirm({ title: "Delete this reminder?", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    try {
+      const db = await getDb();
+      await db.execute("DELETE FROM reminders WHERE id=?", [remEdit.id]);
+      toast("Reminder deleted");
+      setRemEdit(null);
+      await loadMonth();
+    } catch (e) { toast("Failed", String(e)); }
+  }
 
   function openEdit(t: CalTodo) {
     const [rd, rt] = (t.reminder_at || "").split("T");
@@ -89,11 +124,8 @@ export default function CalendarPage({ onNavigate }: Props) {
     try {
       const db = await getDb();
       if (reminder) {
-        const reminderAt = `${date}T${reminderTime}:00`;
-        await db.execute(
-          "INSERT INTO todos (title, due_date, reminder_at, priority) VALUES (?,?,?,?)",
-          [quickTaskTitle, date, reminderAt, "medium"]
-        );
+        // Standalone reminder — NOT a to-do task.
+        await db.execute("INSERT INTO reminders (title, remind_at) VALUES (?,?)", [quickTaskTitle, `${date}T${reminderTime}:00`]);
         toast("Reminder set", `${date} at ${reminderTime}`);
       } else {
         await db.execute("INSERT INTO todos (title, due_date, priority) VALUES (?,?,?)", [quickTaskTitle, date, "medium"]);
@@ -131,17 +163,20 @@ export default function CalendarPage({ onNavigate }: Props) {
       const pad = (n: number) => String(n).padStart(2, "0");
       const ym = `${year}-${pad(month+1)}`;
 
-      const [logs, todos] = await Promise.all([
+      const [logs, todos, reminders] = await Promise.all([
         db.select<{log_date:string; mood:string}[]>(
           "SELECT log_date, mood FROM daily_logs WHERE strftime('%Y-%m', log_date) = ?", [ym]
         ),
         db.select<CalTodo[]>(
           "SELECT id,title,done,priority,due_date,reminder_at FROM todos WHERE strftime('%Y-%m', due_date) = ?", [ym]
         ),
+        db.select<CalReminder[]>(
+          "SELECT id,title,remind_at FROM reminders WHERE strftime('%Y-%m', remind_at) = ? ORDER BY remind_at ASC", [ym]
+        ),
       ]);
 
       const map: Record<string, DayData> = {};
-      const ensure = (d: string) => { if (!map[d]) map[d] = { hasLog:false, mood:"", todos:[] }; };
+      const ensure = (d: string) => { if (!map[d]) map[d] = { hasLog:false, mood:"", todos:[], reminders:[] }; };
       for (const l of logs) {
         ensure(l.log_date);
         map[l.log_date].hasLog = true;
@@ -150,6 +185,11 @@ export default function CalendarPage({ onNavigate }: Props) {
       for (const t of todos) {
         ensure(t.due_date);
         map[t.due_date].todos.push(t);
+      }
+      for (const r of reminders) {
+        const d = r.remind_at.slice(0, 10);
+        ensure(d);
+        map[d].reminders.push(r);
       }
       setData(map);
     } catch (e) { toast("Load failed", String(e)); }
@@ -250,9 +290,21 @@ export default function CalendarPage({ onNavigate }: Props) {
                     {d?.hasLog && !d.mood && <span style={{ width:6, height:6, borderRadius:"50%", background:"var(--teal)" }} title="Has daily log" />}
                   </div>
                   <div className="cal-cell-events">
+                    {(d?.reminders ?? []).slice(0, 2).map(r => (
+                      <div key={`r-${r.id}`} className="cal-event"
+                        title="Reminder · click to edit"
+                        onClick={(e) => { e.stopPropagation(); openReminderEdit(r); }}
+                        style={{
+                          background: "#0d1f2d", color: "#7dd3fc",
+                          borderLeftColor: "#38bdf8", cursor: "pointer",
+                        }}>
+                        <Bell size={8} />
+                        <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.title}</span>
+                      </div>
+                    ))}
                     {visible.map(t => (
                       <div key={t.id} className="cal-event"
-                        title="Click to edit"
+                        title="Task · click to edit"
                         onClick={(e) => { e.stopPropagation(); openEdit(t); }}
                         style={{
                         background: t.done ? "var(--surface3)" : PRIO_BG[t.priority] ?? PRIO_BG.medium,
@@ -308,11 +360,41 @@ export default function CalendarPage({ onNavigate }: Props) {
             )}
           </div>
 
+          {/* Reminders */}
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8, display:"flex", justifyContent:"space-between" }}>
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}><Bell size={11} color="#38bdf8" /> Reminders ({selData?.reminders.length ?? 0})</span>
+              <button onClick={() => { setQuickTaskInput({ date: selected, reminder: true }); setQuickTaskTitle(""); }}
+                style={{ background:"none", border:"none", color:"var(--accent2)", cursor:"pointer", fontSize:10, padding:0 }}>
+                + Add
+              </button>
+            </div>
+            {(!selData || selData.reminders.length === 0) ? (
+              <div style={{ fontSize:12, color:"var(--text-dim)" }}>No reminders.</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {selData.reminders.map(r => (
+                  <div key={r.id} onClick={() => openReminderEdit(r)} style={{
+                    display:"flex", alignItems:"center", gap:10, cursor:"pointer",
+                    padding:"8px 10px", background:"var(--surface2)",
+                    borderRadius:8, borderLeft:"3px solid #38bdf8",
+                  }}>
+                    <Bell size={13} color="#38bdf8" />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12.5 }}>{r.title}</div>
+                      <div style={{ fontSize:10.5, color:"var(--text-muted)" }}>{r.remind_at.slice(11, 16)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Tasks */}
           <div>
             <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8, display:"flex", justifyContent:"space-between" }}>
               <span>Tasks ({selData?.todos.length ?? 0})</span>
-              <button onClick={() => onNavigate("todos")} style={{ background:"none", border:"none", color:"var(--accent2)", cursor:"pointer", fontSize:10, padding:0 }}>
+              <button onClick={() => { setQuickTaskInput({ date: selected, reminder: false }); setQuickTaskTitle(""); }} style={{ background:"none", border:"none", color:"var(--accent2)", cursor:"pointer", fontSize:10, padding:0 }}>
                 + Add
               </button>
             </div>
@@ -435,6 +517,39 @@ export default function CalendarPage({ onNavigate }: Props) {
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
                 <button className="btn btn-primary" onClick={saveEdit}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit reminder */}
+      {remEdit && (
+        <div className="modal-backdrop" onMouseDown={() => setRemEdit(null)}>
+          <div className="modal" onMouseDown={e => e.stopPropagation()} style={{ width: 440 }}>
+            <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Bell size={15} color="#38bdf8" /> Edit reminder
+            </h2>
+            <div className="form-row">
+              <label>Remind me to…</label>
+              <input autoFocus value={remEdit.title} onChange={e => setRemEdit({ ...remEdit, title: e.target.value })}
+                onKeyDown={e => { if (e.key === "Enter") saveReminderEdit(); }} />
+            </div>
+            <div className="form-grid">
+              <div className="form-row">
+                <label>Date</label>
+                <DatePicker value={remEdit.date} onChange={v => v && setRemEdit({ ...remEdit, date: v })} allowClear={false} />
+              </div>
+              <div className="form-row">
+                <label>Time</label>
+                <TimePicker value={remEdit.time} onChange={v => setRemEdit({ ...remEdit, time: v })} />
+              </div>
+            </div>
+            <div className="modal-footer" style={{ justifyContent: "space-between" }}>
+              <button className="btn btn-danger btn-sm" onClick={deleteReminder}><Trash2 size={12} /> Delete</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-ghost" onClick={() => setRemEdit(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={saveReminderEdit}>Save</button>
               </div>
             </div>
           </div>

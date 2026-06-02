@@ -208,6 +208,17 @@ async function initSchema(db: Database) {
     )
   `);
 
+  // Standalone reminders — time-based alerts, separate from to-do tasks.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      remind_at TEXT NOT NULL,
+      fired INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   // Idempotent migrations for users coming from earlier builds
   await tryExec(db, "ALTER TABLE notes ADD COLUMN color TEXT NOT NULL DEFAULT 'default'");
   await tryExec(db, "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
