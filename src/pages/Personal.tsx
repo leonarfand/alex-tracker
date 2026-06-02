@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Trash2, Wallet, Landmark, Smartphone, CreditCard, ArrowLeftRight,
-  TrendingUp, TrendingDown, Repeat, Check, PiggyBank, Pencil,
+  TrendingUp, TrendingDown, Repeat, Check, PiggyBank, Pencil, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { getDb } from "../db";
 import { useApp } from "../App";
@@ -26,6 +26,17 @@ const WALLET_COLORS = ["#7c5af6","#06b6d4","#22d3a4","#fbbf24","#f43f5e","#ec489
 const EXPENSE_CATS = ["Food","Groceries","Transport","Rent","Utilities","Dining","Health","Entertainment","Shopping","Subscriptions","Bills","Other"];
 const INCOME_CATS = ["Salary","Freelance","Bonus","Gift","Refund","Other"];
 const CURRENCY_LOCALE: Record<string,string> = { "$":"en-US","Rp":"id-ID","€":"de-DE","£":"en-GB","¥":"ja-JP","₹":"en-IN","A$":"en-AU","C$":"en-CA" };
+const CAT_PALETTE = ["#7c5af6","#06b6d4","#22d3a4","#fbbf24","#f43f5e","#ec4899","#a78bfa","#fb923c","#60a5fa","#34d399","#f472b6","#94a3b8"];
+
+function shiftMonth(ym: string, delta: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, (m - 1) + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
 
 function walletIcon(type: string, size = 16) {
   if (type === "bank") return <Landmark size={size} />;
@@ -47,9 +58,31 @@ export default function Personal() {
   const [budgetModal, setBudgetModal] = useState<null | { category: string; monthly_limit: string }>(null);
   const [billModal, setBillModal] = useState<null | { id: number; name: string; amount: string; category: string; due_day: string; wallet_id: string }>(null);
 
+  const [viewMonth, setViewMonth] = useState(monthStrWIB());
+
   const { toast, money, currency, confirm } = useApp();
   const month = monthStrWIB();
   const todayDay = parseInt(todayStr().slice(8, 10), 10);
+
+  // Per-month spending breakdown (for the month-selector section)
+  const monthlySpending = useMemo(() => {
+    const monthTx = txs.filter(t => t.tx_date.slice(0, 7) === viewMonth);
+    let income = 0, expense = 0;
+    const byCat: Record<string, number> = {};
+    for (const t of monthTx) {
+      if (t.type === "income") { income += t.amount; }
+      else {
+        expense += t.amount;
+        const c = t.category || "Uncategorized";
+        byCat[c] = (byCat[c] ?? 0) + t.amount;
+      }
+    }
+    const cats = Object.entries(byCat)
+      .map(([label, amount], i) => ({ label, amount, color: CAT_PALETTE[i % CAT_PALETTE.length] }))
+      .sort((a, b) => b.amount - a.amount);
+    const expenseCount = monthTx.filter(t => t.type === "expense").length;
+    return { income, expense, net: income - expense, cats, expenseCount };
+  }, [txs, viewMonth]);
 
   const groupAmount = (digits: string) => digits ? Number(digits).toLocaleString(CURRENCY_LOCALE[currency] || "en-US") : "";
 
@@ -291,6 +324,66 @@ export default function Personal() {
           <MiniStat icon={<TrendingUp size={13} />} label="Income (mo)" value={money(monthStats.income, 0)} color="var(--green)" />
           <MiniStat icon={<TrendingDown size={13} />} label="Spent (mo)" value={money(monthStats.expense, 0)} color="var(--red)" />
           <MiniStat icon={<PiggyBank size={13} />} label="Net (mo)" value={money(monthStats.net, 0)} color={monthStats.net >= 0 ? "var(--accent2)" : "var(--red)"} />
+        </div>
+
+        {/* Monthly spending — pick a month, see exactly what you spent and on what */}
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>Monthly Spending</span>
+            <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setViewMonth(m => shiftMonth(m, -1))}><ChevronLeft size={14} /></button>
+            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 120, textAlign: "center" }}>{monthLabel(viewMonth)}</span>
+            <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setViewMonth(m => shiftMonth(m, 1))}
+              disabled={viewMonth >= month}
+              style={{ opacity: viewMonth >= month ? 0.35 : 1 }}><ChevronRight size={14} /></button>
+            {viewMonth !== month && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setViewMonth(month)}>This month</button>
+            )}
+          </div>
+
+          {/* Totals */}
+          <div style={{ display: "flex", gap: 24, alignItems: "baseline" }}>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Spent</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "var(--red)" }}>{money(monthlySpending.expense, 0)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Income</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--green)" }}>{money(monthlySpending.income, 0)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Net</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: monthlySpending.net >= 0 ? "var(--green)" : "var(--red)" }}>
+                {monthlySpending.net < 0 ? "-" : "+"}{money(Math.abs(monthlySpending.net), 0)}
+              </div>
+            </div>
+            <div style={{ flex: 1, textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>
+              {monthlySpending.expenseCount} expense{monthlySpending.expenseCount === 1 ? "" : "s"}
+            </div>
+          </div>
+
+          {/* Breakdown by category */}
+          {monthlySpending.cats.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--text-dim)", padding: "6px 0" }}>No expenses recorded this month.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {monthlySpending.cats.map(c => {
+                const pct = monthlySpending.expense > 0 ? Math.round((c.amount / monthlySpending.expense) * 100) : 0;
+                return (
+                  <div key={c.label}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{c.label}</span>
+                      <span style={{ color: "var(--text-muted)" }}>{pct}%</span>
+                      <span style={{ fontWeight: 700, minWidth: 90, textAlign: "right" }}>{money(c.amount, 0)}</span>
+                    </div>
+                    <div style={{ height: 6, background: "var(--surface3)", borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: c.color, transition: "width 0.3s" }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Wallets */}
