@@ -12,6 +12,7 @@ import { todayStr, nowStamp } from "../time";
 interface Todo {
   id: number;
   title: string;
+  description: string;
   done: number;
   priority: string;
   due_date: string | null;
@@ -23,7 +24,7 @@ interface Todo {
 const PRIORITIES = ["high","medium","low"] as const;
 const PRIO_COLOR: Record<string,string> = { high:"var(--red)", medium:"var(--amber)", low:"var(--green)" };
 
-const emptyForm = { id: 0, title:"", priority:"medium" as string, due_date:"", reminder_at:"", project:"" };
+const emptyForm = { id: 0, title:"", description:"", priority:"medium" as string, due_date:"", reminder_at:"", project:"" };
 
 export default function Todos() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -127,6 +128,7 @@ export default function Todos() {
     setForm({
       id: t.id,
       title: t.title,
+      description: t.description ?? "",
       priority: t.priority,
       due_date: t.due_date ?? "",
       reminder_at: t.reminder_at ?? "",
@@ -142,13 +144,13 @@ export default function Todos() {
       if (form.id) {
         // Editing: reset reminder_fired so a changed reminder will alarm again
         await db.execute(
-          "UPDATE todos SET title=?,priority=?,due_date=?,reminder_at=?,project=?,reminder_fired=0 WHERE id=?",
-          [form.title, form.priority, form.due_date||null, form.reminder_at||null, form.project, form.id]
+          "UPDATE todos SET title=?,description=?,priority=?,due_date=?,reminder_at=?,project=?,reminder_fired=0 WHERE id=?",
+          [form.title, form.description, form.priority, form.due_date||null, form.reminder_at||null, form.project, form.id]
         );
       } else {
         await db.execute(
-          "INSERT INTO todos (title,priority,due_date,reminder_at,project) VALUES (?,?,?,?,?)",
-          [form.title, form.priority, form.due_date||null, form.reminder_at||null, form.project]
+          "INSERT INTO todos (title,description,priority,due_date,reminder_at,project) VALUES (?,?,?,?,?,?)",
+          [form.title, form.description, form.priority, form.due_date||null, form.reminder_at||null, form.project]
         );
       }
       // Auto-create project record if it's a new one
@@ -321,6 +323,11 @@ export default function Todos() {
                       }}>
                         {t.title}
                       </div>
+                      {t.description && (
+                        <div style={{ fontSize:12, color:"var(--text-muted)", marginTop:2, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", lineHeight:1.5 }}>
+                          {t.description}
+                        </div>
+                      )}
                       <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap", alignItems:"center" }}>
                         {t.project && (
                           <span className="tag">{t.project}</span>
@@ -365,6 +372,11 @@ export default function Todos() {
               <label>Task title</label>
               <input autoFocus value={form.title} onChange={e => setForm({...form,title:e.target.value})}
                 placeholder="What needs to be done?" onKeyDown={e => e.key==="Enter" && save()} />
+            </div>
+            <div className="form-row">
+              <label>Description</label>
+              <textarea value={form.description} onChange={e => setForm({...form,description:e.target.value})}
+                placeholder="Add details, steps, links… (optional)" rows={3} style={{ resize:"vertical" }} />
             </div>
             <div className="form-grid">
               <div className="form-row">

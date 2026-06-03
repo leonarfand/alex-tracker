@@ -235,4 +235,5 @@ async function initSchema(db: Database) {
   await tryExec(db, "ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   await tryExec(db, "ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
   await tryExec(db, "ALTER TABLE todos ADD COLUMN completed_at TEXT");
+  await tryExec(db, "ALTER TABLE todos ADD COLUMN description TEXT NOT NULL DEFAULT ''");
 }
