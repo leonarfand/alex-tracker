@@ -321,7 +321,7 @@ export default function Notes() {
           </button>
         </div>
 
-        <div style={{ flex:1, overflowY:"auto" }}>
+        <div style={{ flex:1, overflowY:"auto", overflowX:"hidden", minWidth:0 }}>
           {filtered.length === 0 && (
             <div className="empty"><div className="empty-icon">📝</div><p>No notes yet.<br/>Click + to create one.</p></div>
           )}
@@ -357,13 +357,13 @@ export default function Notes() {
               </div>
             ))
           ) : (
-            <div style={{ padding:10, display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div style={{ padding:10, display:"grid", gridTemplateColumns:"1fr", gap:8 }}>
               {filtered.map(n => (
                 <div key={n.id}
                   onClick={() => pick(n)}
                   onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, note: n }); }}
                   className={`card sticky-card sticky-${n.color} note-card ${selected?.id === n.id ? "selected" : ""}`}
-                  style={{ cursor:"pointer", padding:"10px 12px", minHeight:90,
+                  style={{ cursor:"pointer", padding:"10px 12px", minHeight:80, minWidth:0, overflow:"hidden",
                     boxShadow: selected?.id === n.id ? `0 0 0 2px ${COLOR_HEX[n.color]}40` : undefined }}
                 >
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
@@ -378,11 +378,11 @@ export default function Notes() {
                       </button>
                     </div>
                   </div>
-                  <div style={{ fontSize:12, fontWeight:700, marginBottom:4, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>
+                  <div style={{ fontSize:12, fontWeight:700, marginBottom:4, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflowWrap:"anywhere" }}>
                     {n.title || "Untitled"}
                   </div>
                   {n.body && (
-                    <div style={{ fontSize:11, color:"var(--text-muted)", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", lineHeight:1.5 }}>
+                    <div style={{ fontSize:11, color:"var(--text-muted)", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:3, WebkitBoxOrient:"vertical", lineHeight:1.5, overflowWrap:"anywhere" }}>
                       {bodyPreview(n.body)}
                     </div>
                   )}
