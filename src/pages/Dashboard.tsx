@@ -105,7 +105,7 @@ export default function Dashboard({ onNavigate }: Props) {
       const [recentTodos, recentNotes, upReminders] = await Promise.all([
         db.select<RecentTodo[]>("SELECT id,title,priority,due_date,done FROM todos WHERE done=0 ORDER BY due_date ASC NULLS LAST, priority DESC LIMIT 5"),
         db.select<RecentNote[]>("SELECT id,title,color,updated_at,pinned FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 5"),
-        db.select<UpReminder[]>("SELECT id,title,remind_at FROM reminders WHERE remind_at >= ? ORDER BY remind_at ASC LIMIT 6", [nowStamp()]),
+        db.select<UpReminder[]>("SELECT id,title,remind_at FROM reminders WHERE remind_at >= ? ORDER BY remind_at ASC LIMIT 8", [`${today}T00:00:00`]),
       ]);
       setTodos(recentTodos);
       setNotes(recentNotes);
@@ -365,15 +365,22 @@ export default function Dashboard({ onNavigate }: Props) {
               <div className="empty" style={{ padding:"16px 0" }}><div className="empty-icon">🔔</div><p style={{ fontSize:12 }}>No upcoming reminders</p></div>
             ) : (
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                {reminders.map(r => (
-                  <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 8px", borderRadius:6, borderLeft:"2px solid #38bdf8", background:"#0d1f2d55" }}>
-                    <Bell size={12} color="#38bdf8" style={{ flexShrink:0 }} />
-                    <span style={{ flex:1, fontSize:13, color:"var(--text)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.title}</span>
-                    <span style={{ fontSize:10.5, color:"#7dd3fc", whiteSpace:"nowrap" }}>
-                      {r.remind_at.slice(5, 10).replace("-", "/")} {r.remind_at.slice(11, 16)}
-                    </span>
-                  </div>
-                ))}
+                {reminders.map(r => {
+                  const d = r.remind_at.slice(0, 10);
+                  const tomorrow = shiftDay(today, 1);
+                  let label: string, badgeColor: string, accent: string;
+                  if (d === today)        { label = "Today";    badgeColor = "var(--amber)"; accent = "var(--amber)"; }
+                  else if (d === tomorrow){ label = "Tomorrow"; badgeColor = "#38bdf8";      accent = "#38bdf8"; }
+                  else { label = new Date(d + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }); badgeColor = "var(--text-muted)"; accent = "var(--border2)"; }
+                  return (
+                    <div key={r.id} style={{ display:"flex", alignItems:"center", gap:9, padding:"7px 8px", borderRadius:6, borderLeft:`3px solid ${accent}`, background: d === today ? "#2a210866" : "#0d1f2d55" }}>
+                      <Bell size={12} color={badgeColor} style={{ flexShrink:0 }} />
+                      <span style={{ flex:1, fontSize:13, color:"var(--text)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.title}</span>
+                      <span style={{ fontSize:10, fontWeight:700, color:badgeColor, whiteSpace:"nowrap" }}>{label}</span>
+                      <span style={{ fontSize:10.5, color:"var(--text-muted)", whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" }}>{r.remind_at.slice(11, 16)}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
