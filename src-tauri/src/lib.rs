@@ -4,6 +4,8 @@ use tauri::{
     Manager,
 };
 
+mod cloud;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -28,6 +30,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            cloud::turso_test,
+            cloud::turso_exec_batch,
+            cloud::turso_query,
+        ])
         .setup(|app| {
             let show_i = MenuItem::with_id(app, "show", "Show Alex Tracker", true, None::<&str>)?;
             let hide_i = MenuItem::with_id(app, "hide", "Hide window", true, None::<&str>)?;

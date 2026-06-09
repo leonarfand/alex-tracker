@@ -6,6 +6,7 @@ import { writeTextFile, mkdir, exists } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { warmupAudio, startAlarm, stopAlarm } from "./sounds";
 import { todayStr, nowStamp, stampWIB, monthStrWIB } from "./time";
+import { autoPushEnabled, isConfigured, pushToCloud } from "./cloudSync";
 import { getDb } from "./db";
 import Dashboard from "./pages/Dashboard";
 import Notes from "./pages/Notes";
@@ -130,6 +131,15 @@ export default function App() {
     document.documentElement.style.setProperty("--accent", hex);
     document.documentElement.style.setProperty("--accent2", hex + "cc");
     document.documentElement.style.setProperty("--accent-glow", hex + "33");
+  }, []);
+
+  // Auto-upload to Turso every 5 min while open (push-only; pull is manual & explicit).
+  useEffect(() => {
+    if (!autoPushEnabled() || !isConfigured()) return;
+    const push = () => { pushToCloud().catch(() => {}); };
+    const t = setTimeout(push, 8000);         // shortly after launch
+    const id = setInterval(push, 5 * 60_000); // then every 5 minutes
+    return () => { clearTimeout(t); clearInterval(id); };
   }, []);
 
   // Warm up the audio engine on the first user interaction so sounds play

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Download, Trash2, Info, Palette, Keyboard, Database, Volume2, AlertTriangle, FolderOpen, Save, Bell } from "lucide-react";
+import { Download, Trash2, Info, Palette, Keyboard, Database, Volume2, AlertTriangle, FolderOpen, Save, Bell, Cloud, CloudUpload, CloudDownload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getDb } from "../db";
 import { useApp } from "../App";
 import { isSoundEnabled, setSoundEnabled, sounds, previewAlarm } from "../sounds";
 import { todayStr } from "../time";
+import { getCreds, setCreds, isConfigured, testConnection, pushToCloud, pullFromCloud, autoPushEnabled, setAutoPush, lastPush, lastPull } from "../cloudSync";
 
 const ACCENTS = [
   { id:"violet",  hex:"#7c5af6", label:"Violet (default)" },
@@ -28,6 +29,13 @@ export default function Settings() {
   const [backupDays, setBackupDays] = useState(7);
   const [backupFolder, setBackupFolder] = useState("");
   const [backupLastAt, setBackupLastAt] = useState(0);
+  const [syncUrl, setSyncUrl] = useState("");
+  const [syncToken, setSyncToken] = useState("");
+  const [autoPush, setAutoPushState] = useState(false);
+  const [syncBusy, setSyncBusy] = useState<null | "test" | "push" | "pull">(null);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [lastPushAt, setLastPushAt] = useState(0);
+  const [lastPullAt, setLastPullAt] = useState(0);
   const { toast, currency, setCurrency, confirm } = useApp();
 
   useEffect(() => {
@@ -37,8 +45,63 @@ export default function Settings() {
     setBackupDays(parseInt(localStorage.getItem("settings.autoBackup.days") ?? "7", 10));
     setBackupFolder(localStorage.getItem("settings.autoBackup.folder") ?? "");
     setBackupLastAt(parseInt(localStorage.getItem("settings.autoBackup.lastAt") ?? "0", 10));
+    const creds = getCreds();
+    setSyncUrl(creds.url);
+    setSyncToken(creds.token);
+    setAutoPushState(autoPushEnabled());
+    setLastPushAt(lastPush());
+    setLastPullAt(lastPull());
     loadCounts();
   }, []);
+
+  async function handleSaveTest() {
+    if (!syncUrl.trim() || !syncToken.trim()) { setSyncMsg("Enter URL and token"); return; }
+    setSyncBusy("test"); setSyncMsg("");
+    try {
+      await testConnection(syncUrl, syncToken);
+      setCreds(syncUrl, syncToken);
+      setSyncMsg("✓ Connected & saved");
+      toast("Cloud connected");
+    } catch (e) {
+      setSyncMsg("✗ " + String(e));
+    } finally { setSyncBusy(null); }
+  }
+
+  async function handlePush() {
+    setSyncBusy("push"); setSyncMsg("");
+    try {
+      const r = await pushToCloud();
+      setLastPushAt(lastPush());
+      setSyncMsg(`✓ Uploaded ${r.rows} rows`);
+      toast("Pushed to cloud", `${r.rows} rows`);
+    } catch (e) { setSyncMsg("✗ " + String(e)); toast("Push failed", String(e)); }
+    finally { setSyncBusy(null); }
+  }
+
+  async function handlePull() {
+    const ok = await confirm({
+      title: "Pull from cloud?",
+      message: "This replaces ALL data on this device with the cloud copy. Make sure you pushed your latest data from the other device first.",
+      confirmLabel: "Replace local data",
+      danger: true,
+    });
+    if (!ok) return;
+    setSyncBusy("pull"); setSyncMsg("");
+    try {
+      const r = await pullFromCloud();
+      setLastPullAt(lastPull());
+      toast("Pulled from cloud", `${r.rows} rows — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) { setSyncMsg("✗ " + String(e)); toast("Pull failed", String(e)); setSyncBusy(null); }
+  }
+
+  function toggleAutoPush() {
+    if (!isConfigured()) { toast("Connect to Turso first"); return; }
+    const next = !autoPush;
+    setAutoPushState(next);
+    setAutoPush(next);
+    toast(next ? "Auto-upload on" : "Auto-upload off");
+  }
 
   async function pickBackupFolder() {
     try {
@@ -279,6 +342,53 @@ export default function Settings() {
               )}
             </div>
           </Row>
+        </Section>
+
+        {/* Cloud Sync */}
+        <Section icon={<Cloud size={14} />} title="Cloud Sync (Turso)">
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.6 }}>
+            Sync your data to your own Turso database. Your app stays local-first — this uploads a
+            copy to the cloud so you can pull it on another device. Credentials are stored on this
+            device only.
+          </div>
+          <Row label="Database URL">
+            <input value={syncUrl} onChange={e => setSyncUrl(e.target.value)}
+              placeholder="libsql://your-db.turso.io" spellCheck={false}
+              style={{ fontFamily: "monospace", fontSize: 12 }} />
+          </Row>
+          <Row label="Auth token" hint="Pasted here only, saved locally — never shared">
+            <input type="password" value={syncToken} onChange={e => setSyncToken(e.target.value)}
+              placeholder="eyJ…" spellCheck={false}
+              style={{ fontFamily: "monospace", fontSize: 12 }} />
+          </Row>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="btn btn-ghost btn-sm" disabled={syncBusy !== null} onClick={handleSaveTest}>
+              {syncBusy === "test" ? "Connecting…" : "Save & test"}
+            </button>
+            <button className="btn btn-primary btn-sm" disabled={syncBusy !== null || !isConfigured()} onClick={handlePush}>
+              <CloudUpload size={13} /> {syncBusy === "push" ? "Uploading…" : "Push to cloud"}
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled={syncBusy !== null || !isConfigured()} onClick={handlePull}>
+              <CloudDownload size={13} /> {syncBusy === "pull" ? "Downloading…" : "Pull from cloud"}
+            </button>
+            {syncMsg && <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{syncMsg}</span>}
+          </div>
+          <Row label="Auto-upload" hint="Automatically push to the cloud every few minutes while the app is open">
+            <button className={`btn btn-sm ${autoPush ? "btn-primary" : "btn-ghost"}`} onClick={toggleAutoPush}>
+              {autoPush ? "🟢 On" : "⚪ Off"}
+            </button>
+          </Row>
+          {(lastPushAt > 0 || lastPullAt > 0) && (
+            <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+              {lastPushAt > 0 && <>Last push: {new Date(lastPushAt).toLocaleString()}</>}
+              {lastPushAt > 0 && lastPullAt > 0 && " · "}
+              {lastPullAt > 0 && <>Last pull: {new Date(lastPullAt).toLocaleString()}</>}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: "var(--amber)" }}>
+            ⚠️ "Pull" replaces this device's data with the cloud copy. Push from the device with your
+            latest data first.
+          </div>
         </Section>
 
         {/* Data */}
