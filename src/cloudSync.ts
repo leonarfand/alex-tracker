@@ -38,11 +38,21 @@ export async function pushToCloud(): Promise<{ tables: number; rows: number }> {
   const tables = await db.select<{ name: string; sql: string }[]>(TABLES_SQL);
 
   const stmts: { sql: string; params: any[] }[] = [];
+  // Belt-and-suspenders against foreign-key constraints (Turso enforces them):
+  // (1) disable enforcement, and (2) delete children-first, insert parents-first.
+  stmts.push({ sql: "PRAGMA foreign_keys=OFF", params: [] });
+
+  // 1. Create every table (sqlite_master order = parents before children).
+  for (const t of tables) {
+    stmts.push({ sql: t.sql.replace(/^CREATE TABLE\s+/i, "CREATE TABLE IF NOT EXISTS "), params: [] });
+  }
+  // 2. Clear them children-first (reverse order).
+  for (let i = tables.length - 1; i >= 0; i--) {
+    stmts.push({ sql: `DELETE FROM ${q(tables[i].name)}`, params: [] });
+  }
+  // 3. Insert rows parents-first (forward order).
   let rowCount = 0;
   for (const t of tables) {
-    const createSql = t.sql.replace(/^CREATE TABLE\s+/i, "CREATE TABLE IF NOT EXISTS ");
-    stmts.push({ sql: createSql, params: [] });
-    stmts.push({ sql: `DELETE FROM ${q(t.name)}`, params: [] });
     const rows = await db.select<Record<string, any>[]>(`SELECT * FROM ${q(t.name)}`);
     for (const row of rows) {
       const cols = Object.keys(row);
@@ -66,13 +76,25 @@ export async function pullFromCloud(): Promise<{ tables: number; rows: number }>
   const db = await getDb();
   const remoteTables = await invoke<{ name: string; sql: string }[]>("turso_query", { url, token, sql: TABLES_SQL });
 
-  let rowCount = 0;
+  // Fetch everything first, then apply (so we can delete children-first / insert parents-first).
+  const data: { name: string; sql: string; rows: Record<string, any>[] }[] = [];
   for (const t of remoteTables) {
     const rows = await invoke<Record<string, any>[]>("turso_query", { url, token, sql: `SELECT * FROM ${q(t.name)}` });
-    // Make sure the local table exists, then replace its contents.
+    data.push({ name: t.name, sql: t.sql, rows });
+  }
+
+  // Ensure local tables exist.
+  for (const t of data) {
     await db.execute(t.sql.replace(/^CREATE TABLE\s+/i, "CREATE TABLE IF NOT EXISTS ")).catch(() => {});
-    await db.execute(`DELETE FROM ${q(t.name)}`);
-    for (const row of rows) {
+  }
+  // Clear children-first (reverse), so local FK enforcement doesn't block deletes.
+  for (let i = data.length - 1; i >= 0; i--) {
+    await db.execute(`DELETE FROM ${q(data[i].name)}`);
+  }
+  // Insert parents-first (forward).
+  let rowCount = 0;
+  for (const t of data) {
+    for (const row of t.rows) {
       const cols = Object.keys(row);
       if (cols.length === 0) continue;
       await db.execute(
@@ -83,5 +105,5 @@ export async function pullFromCloud(): Promise<{ tables: number; rows: number }>
     }
   }
   localStorage.setItem("sync.lastPull", String(Date.now()));
-  return { tables: remoteTables.length, rows: rowCount };
+  return { tables: data.length, rows: rowCount };
 }
