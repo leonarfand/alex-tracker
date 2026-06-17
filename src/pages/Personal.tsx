@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Trash2, Wallet, Landmark, Smartphone, CreditCard, ArrowLeftRight,
-  TrendingUp, TrendingDown, Repeat, Check, PiggyBank, Pencil, ChevronLeft, ChevronRight,
+  TrendingUp, TrendingDown, Repeat, Check, PiggyBank, Pencil, ChevronLeft, ChevronRight, RotateCcw,
 } from "lucide-react";
 import { getDb } from "../db";
 import { useApp } from "../App";
@@ -25,6 +25,8 @@ const WALLET_TYPES = [
 const WALLET_COLORS = ["#7c5af6","#06b6d4","#22d3a4","#fbbf24","#f43f5e","#ec4899","#a78bfa","#fb923c"];
 const EXPENSE_CATS = ["Food","Groceries","Transport","Rent","Utilities","Dining","Health","Entertainment","Shopping","Subscriptions","Bills","Other"];
 const INCOME_CATS = ["Salary","Freelance","Bonus","Gift","Refund","Other"];
+// Category used by the per-wallet "reset to zero" button. Kept out of spending/income stats.
+const ADJUST_CAT = "Adjustment";
 const CURRENCY_LOCALE: Record<string,string> = { "$":"en-US","Rp":"id-ID","€":"de-DE","£":"en-GB","¥":"ja-JP","₹":"en-IN","A$":"en-AU","C$":"en-CA" };
 const CAT_PALETTE = ["#7c5af6","#06b6d4","#22d3a4","#fbbf24","#f43f5e","#ec4899","#a78bfa","#fb923c","#60a5fa","#34d399","#f472b6","#94a3b8"];
 
@@ -66,7 +68,7 @@ export default function Personal() {
 
   // Per-month spending breakdown (for the month-selector section)
   const monthlySpending = useMemo(() => {
-    const monthTx = txs.filter(t => t.tx_date.slice(0, 7) === viewMonth);
+    const monthTx = txs.filter(t => t.tx_date.slice(0, 7) === viewMonth && t.category !== ADJUST_CAT);
     let income = 0, expense = 0;
     const byCat: Record<string, number> = {};
     for (const t of monthTx) {
@@ -125,6 +127,7 @@ export default function Personal() {
     let income = 0, expense = 0;
     for (const t of txs) {
       if (t.tx_date.slice(0, 7) !== month) continue;
+      if (t.category === ADJUST_CAT) continue;
       if (t.type === "income") income += t.amount; else expense += t.amount;
     }
     return { income, expense, net: income - expense };
@@ -182,6 +185,29 @@ export default function Personal() {
       await db.execute("DELETE FROM transfers WHERE from_wallet_id=? OR to_wallet_id=?", [w.id, w.id]);
       await db.execute("DELETE FROM wallets WHERE id=?", [w.id]);
       toast("Wallet deleted");
+      await load();
+    } catch (e) { toast("Failed", String(e)); }
+  }
+
+  // Settle a wallet back to zero (e.g. after paying off a tracked debt) by
+  // recording one balancing adjustment. History stays; delete the row to undo.
+  async function resetWallet(w: WalletRow) {
+    const bal = balances[w.id] ?? 0;
+    if (Math.abs(bal) < 0.005) { toast("Already at zero", `${w.name} is settled`); return; }
+    const ok = await confirm({
+      title: `Reset "${w.name}" to zero?`,
+      message: `${w.name} is at ${money(bal)}. This records a one-off adjustment so the balance reads zero — your past transactions stay untouched.`,
+      confirmLabel: "Reset to zero",
+    });
+    if (!ok) return;
+    try {
+      const db = await getDb();
+      // Income cancels a negative balance; expense cancels a positive one.
+      const type = bal < 0 ? "income" : "expense";
+      await db.execute("INSERT INTO personal_tx (wallet_id,type,amount,category,description,tx_date) VALUES (?,?,?,?,?,?)",
+        [w.id, type, Math.abs(bal), ADJUST_CAT, "Balance reset", todayStr()]);
+      sounds.success();
+      toast("Wallet reset", `${w.name} back to zero`);
       await load();
     } catch (e) { toast("Failed", String(e)); }
   }
@@ -391,25 +417,42 @@ export default function Personal() {
           {wallets.length === 0 ? (
             <Empty icon={<Wallet size={26} />} text="No wallets yet. Add Cash, your Bank, GoPay/OVO…" />
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-              {wallets.map(w => (
-                <div key={w.id} className="card" style={{ padding: "14px 16px", borderTop: `3px solid ${w.color}`, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: w.color, display: "flex" }}>{walletIcon(w.type)}</span>
-                    <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{w.name}</span>
-                    <button className="btn btn-ghost btn-icon btn-sm" style={{ padding: "3px 4px" }}
-                      onClick={() => setWalletModal({ id: w.id, name: w.name, type: w.type, opening_balance: String(w.opening_balance), color: w.color })}>
-                      <Pencil size={11} />
-                    </button>
-                    <button className="btn btn-ghost btn-icon btn-sm" style={{ padding: "3px 4px" }} onClick={() => delWallet(w)}>
-                      <Trash2 size={11} />
-                    </button>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
+              {wallets.map(w => {
+                const bal = balances[w.id] ?? 0;
+                const typeLabel = WALLET_TYPES.find(t => t.value === w.type)?.label ?? w.type;
+                return (
+                  <div key={w.id} className="card wallet-card">
+                    <div style={{ height: 3, background: `linear-gradient(90deg, ${w.color}, ${w.color}33)` }} />
+                    <div style={{ padding: "13px 15px 15px", display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ width: 30, height: 30, borderRadius: 9, display: "grid", placeItems: "center", background: `${w.color}22`, color: w.color, flexShrink: 0 }}>
+                          {walletIcon(w.type, 15)}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.name}</div>
+                          <div style={{ fontSize: 10.5, color: "var(--text-dim)" }}>{typeLabel}</div>
+                        </div>
+                        <div className="wallet-actions" style={{ display: "flex", gap: 1 }}>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Reset to zero" style={{ padding: "4px 5px" }} onClick={() => resetWallet(w)}>
+                            <RotateCcw size={11} />
+                          </button>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Edit wallet" style={{ padding: "4px 5px" }}
+                            onClick={() => setWalletModal({ id: w.id, name: w.name, type: w.type, opening_balance: String(w.opening_balance), color: w.color })}>
+                            <Pencil size={11} />
+                          </button>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Delete wallet" style={{ padding: "4px 5px" }} onClick={() => delWallet(w)}>
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", color: bal >= 0 ? "var(--text)" : "var(--red)" }}>
+                        {money(bal)}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: balances[w.id] >= 0 ? "var(--text)" : "var(--red)" }}>
-                    {money(balances[w.id] ?? 0)}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Section>
