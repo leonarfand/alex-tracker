@@ -90,8 +90,15 @@ export default function Settings() {
     try {
       const r = await pullFromCloud();
       setLastPullAt(lastPull());
-      toast("Pulled from cloud", `${r.rows} rows — reloading…`);
-      setTimeout(() => window.location.reload(), 800);
+      if (r.skipped > 0) {
+        // Don't auto-reload — let the user see which tables couldn't be applied.
+        setSyncMsg(`✓ Pulled ${r.rows} rows · ⚠ ${r.skipped} skipped in: ${r.failed.join(", ")}`);
+        toast("Pulled with warnings", `${r.skipped} rows skipped — see Settings`);
+        setSyncBusy(null);
+      } else {
+        toast("Pulled from cloud", `${r.rows} rows — reloading…`);
+        setTimeout(() => window.location.reload(), 800);
+      }
     } catch (e) { setSyncMsg("✗ " + String(e)); toast("Pull failed", String(e)); setSyncBusy(null); }
   }
 

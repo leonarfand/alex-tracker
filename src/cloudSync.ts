@@ -70,7 +70,7 @@ export async function pushToCloud(): Promise<{ tables: number; rows: number }> {
 }
 
 /** Download the whole Turso database into local (replace local with remote). */
-export async function pullFromCloud(): Promise<{ tables: number; rows: number }> {
+export async function pullFromCloud(): Promise<{ tables: number; rows: number; skipped: number; failed: string[] }> {
   const { url, token } = getCreds();
   if (!url || !token) throw new Error("Cloud not configured");
   const db = await getDb();
@@ -83,27 +83,39 @@ export async function pullFromCloud(): Promise<{ tables: number; rows: number }>
     data.push({ name: t.name, sql: t.sql, rows });
   }
 
-  // Ensure local tables exist.
+  // Ensure local tables exist. Older installs may predate some tables (e.g. the
+  // personal-finance ones), so recreate them from the remote schema first.
   for (const t of data) {
     await db.execute(t.sql.replace(/^CREATE TABLE\s+/i, "CREATE TABLE IF NOT EXISTS ")).catch(() => {});
   }
   // Clear children-first (reverse), so local FK enforcement doesn't block deletes.
+  // Isolated per table — a stray failure here must never abort the whole pull.
   for (let i = data.length - 1; i >= 0; i--) {
-    await db.execute(`DELETE FROM ${q(data[i].name)}`);
+    await db.execute(`DELETE FROM ${q(data[i].name)}`).catch(e => console.warn(`[sync] pull: clearing ${data[i].name} failed`, e));
   }
-  // Insert parents-first (forward).
-  let rowCount = 0;
+  // Insert parents-first (forward). Every table and row is isolated so a single
+  // bad row can't stop the tables that come after it — notably the personal_*
+  // tables, which sort last and were silently dropped on any earlier error.
+  let rowCount = 0, skipped = 0;
+  const failed: string[] = [];
   for (const t of data) {
+    let tableFailed = false;
     for (const row of t.rows) {
       const cols = Object.keys(row);
       if (cols.length === 0) continue;
-      await db.execute(
-        `INSERT INTO ${q(t.name)} (${cols.map(q).join(",")}) VALUES (${cols.map(() => "?").join(",")})`,
-        cols.map(c => row[c])
-      );
-      rowCount++;
+      try {
+        await db.execute(
+          `INSERT INTO ${q(t.name)} (${cols.map(q).join(",")}) VALUES (${cols.map(() => "?").join(",")})`,
+          cols.map(c => row[c])
+        );
+        rowCount++;
+      } catch (e) {
+        skipped++; tableFailed = true;
+        console.warn(`[sync] pull: insert into ${t.name} failed`, e);
+      }
     }
+    if (tableFailed) failed.push(t.name);
   }
   localStorage.setItem("sync.lastPull", String(Date.now()));
-  return { tables: data.length, rows: rowCount };
+  return { tables: data.length, rows: rowCount, skipped, failed };
 }
